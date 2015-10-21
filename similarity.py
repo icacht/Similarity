@@ -1,4 +1,5 @@
 import sqlite3
+from itertools import combinations
 
 class InterfaceDB:
     def __init__(self, dbname=':memory:'):
@@ -46,8 +47,21 @@ class InterfaceDB:
         keyword_id = cur.fetchone()[0]
         self.con.execute('INSERT INTO cor_user_keyword (user_id, keyword_id) VALUES (?, ?)', (user_id, keyword_id))
 
-def getSimilarity(namex, namey):
-    pass
+    def getSimilarity(self, namex, namey):
+        selectUser = 'SELECT id FROM user_list WHERE name=?'
+        selectCur = 'SELECT keyword_id FROM cor_user_keyword WHERE user_id=?'
+    
+        cur = self.con.cursor()
+        x_id = cur.execute(selectUser, (namex,)).fetchone()[0]
+        y_id = cur.execute(selectUser, (namey,)).fetchone()[0]
+        x_set = set([i[0] for i in cur.execute(selectCur, (x_id,)).fetchall()])
+        y_set = set([i[0] for i in cur.execute(selectCur, (y_id,)).fetchall()])
+    
+        return len(x_set & y_set)
+
+    def getAllSimilarity(self):
+        user_list = [i[0] for i in self.con.execute('SELECT name FROM user_list').fetchall()]
+        return {(i, j): self.getSimilarity(i, j) for i, j in combinations(user_list, 2)}
 
 def test():
     db = InterfaceDB()
@@ -64,6 +78,12 @@ def test():
     
     for i,j in zip(range(ord('A'), ord('Z')+1), range(ord('a'), ord('z')+1)):
         db.insertCorUserKeyword(chr(i), chr(j))
+    for i,j in [('A', 'b'), ('A', 'c'), ('A', 'z'), ('B', 'c'), ('B', 'z'), ('B', 'g')]:
+        db.insertCorUserKeyword(i, j)
     print(db.con.execute("SELECT * FROM cor_user_keyword").fetchall())
+    
+    print(db.getSimilarity('A', 'B'))
+    print(db.getAllSimilarity())
+
 if __name__ == '__main__':
     test()
