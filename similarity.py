@@ -1,6 +1,7 @@
 #-*- coding: utf-8 -*-
 import sqlite3
 from itertools import combinations
+from functools import partial
 
 class DBTable:
     def __init__(self, db, tablename, attributes):
@@ -55,17 +56,18 @@ class Similarity:
             keyword_id = self.keyword_list.select('id', "keyword=?",(keyword,))
         self.cor_word_keyword.insert(('word', word), ('keyword_id', keyword_id[0][0]))
 
-
     def insertCorUserKeyword(self, name, word):
         user_id = self.user_list.select("id", "name=?", (name,))[0][0]
         keyword_id = self.cor_word_keyword.select("keyword_id", "word=?", (word,))[0][0]
         self.cor_user_keyword.insert(('user_id', user_id), ('keyword_id', keyword_id))
 
     def getSimilarity(self, namex, namey):
-        x_id = self.user_list.select("id", "name=?", (namex,))[0][0]
-        y_id = self.user_list.select("id", "name=?", (namey,))[0][0]
-        x_set = set([i[0] for i in self.cor_user_keyword.select("keyword_id", "user_id=?", (x_id,))])
-        y_set = set([i[0] for i in self.cor_user_keyword.select("keyword_id", "user_id=?", (y_id,))])
+        select_id = partial(self.user_list.select, "id", "name=?")
+        select_keyword_id = partial(self.cor_user_keyword.select, "keyword_id", "user_id=?")
+        x_id = select_id((namex,))[0][0]
+        y_id = select_id((namey,))[0][0]
+        x_set = set([i[0] for i in select_keyword_id((x_id,))])
+        y_set = set([i[0] for i in select_keyword_id((y_id,))])
         return len(x_set & y_set)
 
     def getAllSimilarity(self):
@@ -75,17 +77,17 @@ class Similarity:
 def test():
     db = Similarity()
     print(db.con.execute("SELECT * FROM sqlite_master").fetchall())
-    
+
     for i in range(ord('A'), ord('Z')+1):
         # db.user_list.insert(("name", chr(i))) #tuple or keyword
         db.user_list.insert(name=chr(i))
     print(db.user_list.select("*"))
-    
+
     for i in range(ord('a'), ord('z')+1):
         db.insertCorWordKeyword(chr(i), chr(i))
     print(db.keyword_list.select("*"))
     print(db.cor_word_keyword.select("*"))
-    
+
     for i,j in zip(range(ord('A'), ord('Z')+1), range(ord('a'), ord('z')+1)):
         db.insertCorUserKeyword(chr(i), chr(j))
     for i,j in [('A', 'b'), ('A', 'c'), ('A', 'z'), ('B', 'c'), ('B', 'z'), ('B', 'g')]:
