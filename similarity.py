@@ -26,12 +26,12 @@ class DBTable:
         insertValue += "(%s)" % ", ".join(('?' for i in range(len(values))))
         self.db.execute(insertValue, val)
 
-    def select(self, query, where):
+    def select(self, query, where=None, values=()):
         selectValue = "SELECT %s" % query
         selectValue +=  " FROM %s" % self.tablename
         if where is not None:
             selectValue += " WHERE %s" % where
-        return self.db.execute(selectValue).fetchall()
+        return self.db.execute(selectValue, values).fetchall()
 
 class Similarity:
     def __init__(self, dbname=':memory:'):
@@ -49,27 +49,27 @@ class Similarity:
             setattr(self, t, DBTable(self.con, t, table_list[t]))
 
     def insertCorWordKeyword(self, word, keyword):
-        keyword_id = self.keyword_list.select('id', "keyword='%s'" % keyword)
+        keyword_id = self.keyword_list.select('id', "keyword=?", (keyword,))
         if keyword_id == []:
             self.keyword_list.insert(('keyword', keyword))
-            keyword_id = self.keyword_list.select('id', "keyword='%s'" % keyword)
+            keyword_id = self.keyword_list.select('id', "keyword=?",(keyword,))
         self.cor_word_keyword.insert(('word', word), ('keyword_id', keyword_id[0][0]))
 
 
     def insertCorUserKeyword(self, name, word):
-        user_id = self.user_list.select("id", "name='%s'"%(name,))[0][0]
-        keyword_id = self.cor_word_keyword.select("keyword_id", "word='%s'"%(word,))[0][0]
+        user_id = self.user_list.select("id", "name=?", (name,))[0][0]
+        keyword_id = self.cor_word_keyword.select("keyword_id", "word=?", (word,))[0][0]
         self.cor_user_keyword.insert(('user_id', user_id), ('keyword_id', keyword_id))
 
     def getSimilarity(self, namex, namey):
-        x_id = self.user_list.select("id", "name='%s'"%(namex,))[0][0]
-        y_id = self.user_list.select("id", "name='%s'"%(namey,))[0][0]
-        x_set = set([i[0] for i in self.cor_user_keyword.select("keyword_id", "user_id=%d"%(x_id,))])
-        y_set = set([i[0] for i in self.cor_user_keyword.select("keyword_id", "user_id=%d"%(y_id,))])
+        x_id = self.user_list.select("id", "name=?", (namex,))[0][0]
+        y_id = self.user_list.select("id", "name=?", (namey,))[0][0]
+        x_set = set([i[0] for i in self.cor_user_keyword.select("keyword_id", "user_id=?", (x_id,))])
+        y_set = set([i[0] for i in self.cor_user_keyword.select("keyword_id", "user_id=?", (y_id,))])
         return len(x_set & y_set)
 
     def getAllSimilarity(self):
-        user_list = [i[0] for i in self.user_list.select("name", None)]
+        user_list = [i[0] for i in self.user_list.select("name")]
         return {(i, j): self.getSimilarity(i, j) for i, j in combinations(user_list, 2)}
 
 def test():
@@ -79,18 +79,18 @@ def test():
     for i in range(ord('A'), ord('Z')+1):
         # db.user_list.insert(("name", chr(i))) #tuple or keyword
         db.user_list.insert(name=chr(i))
-    print(db.user_list.select("*", None))
+    print(db.user_list.select("*"))
     
     for i in range(ord('a'), ord('z')+1):
         db.insertCorWordKeyword(chr(i), chr(i))
-    print(db.keyword_list.select("*", None))
-    print(db.cor_word_keyword.select("*", None))
+    print(db.keyword_list.select("*"))
+    print(db.cor_word_keyword.select("*"))
     
     for i,j in zip(range(ord('A'), ord('Z')+1), range(ord('a'), ord('z')+1)):
         db.insertCorUserKeyword(chr(i), chr(j))
     for i,j in [('A', 'b'), ('A', 'c'), ('A', 'z'), ('B', 'c'), ('B', 'z'), ('B', 'g')]:
         db.insertCorUserKeyword(i, j)
-    print(db.cor_user_keyword.select("*", None))
+    print(db.cor_user_keyword.select("*"))
 
     print(db.getSimilarity('A', 'B'))
     print(db.getAllSimilarity())
