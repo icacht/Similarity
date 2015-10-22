@@ -1,7 +1,39 @@
+#-*- coding: utf-8 -*-
 import sqlite3
 from itertools import combinations
 
-class InterfaceDB:
+class DBTable:
+    def __init__(self, db, tablename, attributes):
+        self.db = db
+        self.tablename = tablename
+        self.attributes = attributes
+        
+        checkTable = "SELECT count(*) FROM sqlite_master WHERE type='table' and name=?;"
+        if self.db.execute(checkTable, (self.tablename,)).fetchone( )[0] != 1:
+            self.create()
+
+    def create(self):
+        createTable = "CREATE TABLE %s (%s);"
+        attr = ', '.join([k + ' ' + v for k, v in self.attributes])
+        self.db.execute(createTable % (self.tablename, attr))
+
+    def insert(self, *values, **ivalues):
+        if values is ():
+            values = ivalues.items()
+        insertValue = "INSERT INTO %s" % self.tablename
+        key, val = zip(*values)
+        insertValue += "(%s) VALUES" % ", ".join(key)
+        insertValue += "(%s)" % ", ".join(('?' for i in range(len(values))))
+        self.db.execute(insertValue, val)
+
+    def select(self, query, where):
+        selectValue = "SELECT %s" % query
+        selectValue +=  " FROM %s" % self.tablename
+        if where is not None:
+            selectValue += " WHERE %s" % where
+        return self.db.execute(selectValue).fetchall()
+
+class Similarity:
     def __init__(self, dbname=':memory:'):
         self.con = sqlite3.connect(dbname)
 
@@ -13,75 +45,53 @@ class InterfaceDB:
             'cor_user_keyword':(('user_id', 'INTEGER'), ('keyword_id', 'INTEGER'))
             }
 
-        checkTable = "SELECT count(*) FROM sqlite_master WHERE type='table' and name=?;"
-        createTable = "CREATE TABLE %s (%s);"
-
-        cur = self.con.cursor()
         for t in table_list:
-            cur.execute(checkTable, (t,))
-            if cur.fetchone()[0] != 1:
-                param = ', '.join([k + ' ' + v for k, v in table_list[t]])
-                cur.execute(createTable % (t, param))
-
-    def insertUser(self, name):
-        self.con.execute('INSERT INTO user_list (name) VALUES (?)', (name,))
-
-    def insertKeyword(self, keyword):
-        self.con.execute('INSERT INTO keyword_list (keyword) VALUES (?)', (keyword,))
+            setattr(self, t, DBTable(self.con, t, table_list[t]))
 
     def insertCorWordKeyword(self, word, keyword):
-        cur = self.con.cursor()
-        cur.execute('SELECT id FROM keyword_list WHERE keyword=?', (keyword,))
-        keyword_id = cur.fetchone()
-        if keyword_id is None:
-            self.insertKeyword(keyword)
-            cur.execute('SELECT id FROM keyword_list WHERE keyword=?', (keyword,))
-            keyword_id = cur.fetchone()
-        self.con.execute('INSERT INTO cor_word_keyword (word, keyword_id) VALUES (?, ?)', (word, keyword_id[0]))
+        keyword_id = self.keyword_list.select('id', "keyword='%s'" % keyword)
+        if keyword_id == []:
+            self.keyword_list.insert(('keyword', keyword))
+            keyword_id = self.keyword_list.select('id', "keyword='%s'" % keyword)
+        self.cor_word_keyword.insert(('word', word), ('keyword_id', keyword_id[0][0]))
+
 
     def insertCorUserKeyword(self, name, word):
-        cur = self.con.cursor()
-        cur.execute('SELECT id FROM user_list WHERE name=?', (name,))
-        user_id = cur.fetchone()[0]
-        cur.execute('SELECT keyword_id FROM cor_word_keyword WHERE word=?', (word,))
-        keyword_id = cur.fetchone()[0]
-        self.con.execute('INSERT INTO cor_user_keyword (user_id, keyword_id) VALUES (?, ?)', (user_id, keyword_id))
+        user_id = self.user_list.select("id", "name='%s'"%(name,))[0][0]
+        keyword_id = self.cor_word_keyword.select("keyword_id", "word='%s'"%(word,))[0][0]
+        self.cor_user_keyword.insert(('user_id', user_id), ('keyword_id', keyword_id))
 
     def getSimilarity(self, namex, namey):
-        selectUser = 'SELECT id FROM user_list WHERE name=?'
-        selectCur = 'SELECT keyword_id FROM cor_user_keyword WHERE user_id=?'
-    
-        cur = self.con.cursor()
-        x_id = cur.execute(selectUser, (namex,)).fetchone()[0]
-        y_id = cur.execute(selectUser, (namey,)).fetchone()[0]
-        x_set = set([i[0] for i in cur.execute(selectCur, (x_id,)).fetchall()])
-        y_set = set([i[0] for i in cur.execute(selectCur, (y_id,)).fetchall()])
-    
+        x_id = self.user_list.select("id", "name='%s'"%(namex,))[0][0]
+        y_id = self.user_list.select("id", "name='%s'"%(namey,))[0][0]
+        x_set = set([i[0] for i in self.cor_user_keyword.select("keyword_id", "user_id=%d"%(x_id,))])
+        y_set = set([i[0] for i in self.cor_user_keyword.select("keyword_id", "user_id=%d"%(y_id,))])
         return len(x_set & y_set)
 
     def getAllSimilarity(self):
-        user_list = [i[0] for i in self.con.execute('SELECT name FROM user_list').fetchall()]
+        user_list = [i[0] for i in self.user_list.select("name", None)]
         return {(i, j): self.getSimilarity(i, j) for i, j in combinations(user_list, 2)}
 
 def test():
-    db = InterfaceDB()
+    db = Similarity()
     print(db.con.execute("SELECT * FROM sqlite_master").fetchall())
     
     for i in range(ord('A'), ord('Z')+1):
-        db.insertUser(chr(i))
-    print(db.con.execute("SELECT * FROM user_list").fetchall())
+        # db.user_list.insert(("name", chr(i))) #tuple or keyword
+        db.user_list.insert(name=chr(i))
+    print(db.user_list.select("*", None))
     
     for i in range(ord('a'), ord('z')+1):
         db.insertCorWordKeyword(chr(i), chr(i))
-    print(db.con.execute("SELECT * FROM keyword_list").fetchall())
-    print(db.con.execute("SELECT * FROM cor_word_keyword").fetchall())
+    print(db.keyword_list.select("*", None))
+    print(db.cor_word_keyword.select("*", None))
     
     for i,j in zip(range(ord('A'), ord('Z')+1), range(ord('a'), ord('z')+1)):
         db.insertCorUserKeyword(chr(i), chr(j))
     for i,j in [('A', 'b'), ('A', 'c'), ('A', 'z'), ('B', 'c'), ('B', 'z'), ('B', 'g')]:
         db.insertCorUserKeyword(i, j)
-    print(db.con.execute("SELECT * FROM cor_user_keyword").fetchall())
-    
+    print(db.cor_user_keyword.select("*", None))
+
     print(db.getSimilarity('A', 'B'))
     print(db.getAllSimilarity())
 
